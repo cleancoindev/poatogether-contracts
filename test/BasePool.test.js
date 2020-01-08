@@ -5,6 +5,7 @@ const PoolContext = require('./helpers/PoolContext')
 const setupERC1820 = require('./helpers/setupERC1820')
 const BN = require('bn.js')
 const Pool = artifacts.require('MCDAwarePool.sol')
+const MockPoolRewardListener = artifacts.require('MockPoolRewardListener.sol')
 const {
   SECRET,
   SALT,
@@ -922,6 +923,46 @@ contract('BasePool', (accounts) => {
       assert.equal(await pool.totalBalanceOf(pool.address), toWei('1000'))
       assert.equal(await pool.accountedBalance(), toWei('1000'))
       assert.equal((await pool.methods['balance()'].call()).toString(), toWei('1000'))
+    })
+  })
+
+  describe('notifyWinner()', () => {
+    let listener
+
+    beforeEach(async () => {
+      pool = await poolContext.createPool(feeFraction)
+      listener = await MockPoolRewardListener.new()
+      await listener.initialize(pool.address)
+      await contracts.registry.setInterfaceImplementer(user2, '0x0eac87979bfaf2ee04214abb7b986230831facc465751b8c410d8cd5f24e6398', listener.address, { from: user2 })
+      await poolContext.depositPool(toWei('10'), { from: user2 })
+      await poolContext.nextDraw() // funds are committed
+    })
+
+    it('should notify the winner if they have registered', async () => {
+      assert.equal(await listener.drawId(), '0')
+      await poolContext.nextDraw()
+      assert.equal(await listener.drawId(), '1')
+      assert.equal(await listener.winner(), user2)
+    })
+
+    it('should handle gas over consumption', async () => {
+      await listener.setConsumeGas(true)
+      await poolContext.nextDraw()
+      // set was not made
+      assert.equal(await listener.drawId(), '0')
+      // pool was still successful
+      const result = await pool.getDraw('1')
+      assert.equal(result.winner, user2)
+    })
+
+    it('should handle reverts', async () => {
+      await listener.setRaiseError(true)
+      await poolContext.nextDraw()
+      // set was not made
+      assert.equal(await listener.drawId(), '0')
+      // pool was still successful
+      const result = await pool.getDraw('1')
+      assert.equal(result.winner, user2)
     })
   })
 })

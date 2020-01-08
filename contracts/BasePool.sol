@@ -59,6 +59,11 @@ contract BasePool is Initializable, ReentrancyGuard {
   bytes32 internal constant ROLLED_OVER_ENTROPY_MAGIC_NUMBER = bytes32(uint256(1));
   uint256 internal constant DEFAULT_LOCK_DURATION = 40;
   uint256 internal constant DEFAULT_COOLDOWN_DURATION = 80;
+  IERC1820Registry internal constant ERC1820_REGISTRY = IERC1820Registry(0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24);
+  uint256 internal constant POOL_REWARD_LISTENER_GAS_LIMIT = 100000;
+  // keccak256("PoolRewardListener")
+  bytes32 internal constant POOL_REWARD_LISTENER_HASH =
+      0x0eac87979bfaf2ee04214abb7b986230831facc465751b8c410d8cd5f24e6398;
 
   /**
    * Emitted when a user deposits into the Pool.
@@ -416,6 +421,9 @@ contract BasePool is Initializable, ReentrancyGuard {
       accountedBalance = underlyingBalance;
 
       awardWinnings(winningAddress, netWinnings);
+
+      notifyWinner(winningAddress, drawId, netWinnings);
+
     } else {
       // Only account for the fee
       accountedBalance = accountedBalance.add(fee);
@@ -484,6 +492,14 @@ contract BasePool is Initializable, ReentrancyGuard {
     // _feeFraction *must* be less than 1 ether, so it will never overflow
     int256 feeFixed = FixidityLib.multiply(grossWinningsFixed, FixidityLib.newFixed(int256(_feeFraction), uint8(18)));
     return uint256(FixidityLib.fromFixed(feeFixed));
+  }
+
+  function notifyWinner(address _winner, uint256 _drawId, uint256 amount) internal returns (bool success) {
+    address implementer = ERC1820_REGISTRY.getInterfaceImplementer(_winner, POOL_REWARD_LISTENER_HASH);
+    if (implementer != address(0)) {
+      bytes memory returnValue;
+      (success, returnValue) = implementer.call.gas(POOL_REWARD_LISTENER_GAS_LIMIT)(abi.encodeWithSignature("drawWinner(uint256,address,uint256)", _drawId, _winner, amount));
+    }
   }
 
   /**
