@@ -569,10 +569,9 @@
     web3-eth-contract "1.2.2"
     web3-utils "1.2.2"
 
-"@openzeppelin/contracts-ethereum-package@2.4.0":
+"@openzeppelin/contracts-ethereum-package@pooltogether/openzeppelin-contracts-ethereum-package#bd88334148ea45e49dc849442851f6f4f50ac74c":
   version "2.4.0"
-  resolved "https://registry.yarnpkg.com/@openzeppelin/contracts-ethereum-package/-/contracts-ethereum-package-2.4.0.tgz#cd98612022cadb8710c26901bc564240a19a9b40"
-  integrity sha512-GC1aOgTnuNnlhdYOCKFizLCQRgYlbImWi+aJ9Lw4Yw4BSLHzfPg+XV0tgn9l+KnFAzgoUEg2aD2wmaHZBjEnSw==
+  resolved "https://codeload.github.com/pooltogether/openzeppelin-contracts-ethereum-package/tar.gz/bd88334148ea45e49dc849442851f6f4f50ac74c"
 
 "@openzeppelin/resolver-engine-core@^0.3.3":
   version "0.3.3"

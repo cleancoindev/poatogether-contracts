@@ -35,7 +35,7 @@
   },
   "dependencies": {
     "@kleros/kleros": "DeltaCamp/kleros#ca7fbdcc195cfd1267efb99aae905c3400a5ea5f",
-    "@openzeppelin/contracts-ethereum-package": "2.4.0",
+    "@openzeppelin/contracts-ethereum-package": "pooltogether/openzeppelin-contracts-ethereum-package#bd88334148ea45e49dc849442851f6f4f50ac74c",
     "scd-mcd-migration": "pooltogether/scd-mcd-migration",
     "@openzeppelin/upgrades": "2.5.1",
     "fixidity": "DeltaCamp/Fixidity#edf533f77df43b16a7b92f17af7a8930db01f293"

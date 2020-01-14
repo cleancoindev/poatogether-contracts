@@ -14,17 +14,17 @@ module.exports = function PoolContext({ web3, artifacts, accounts }) {
 
   let pool, token, moneyMarket, sumTree, drawManager, registry, blocklock,  poolToken
   
-  const [owner, admin, user1, user2] = accounts
+  const [owner, admin, user1, user2, user3] = accounts
 
   const Token = artifacts.require('Token.sol')
   const MCDAwarePool = artifacts.require('MCDAwarePool.sol')
-  const BasePool = artifacts.require('BasePool.sol')
   const CErc20Mock = artifacts.require('CErc20Mock.sol')
   const FixidityLib = artifacts.require('FixidityLib.sol')
   const SortitionSumTreeFactory = artifacts.require('SortitionSumTreeFactory.sol')
   const DrawManager = artifacts.require('DrawManager.sol')
   const Blocklock = artifacts.require('Blocklock.sol')
   const PoolToken = artifacts.require('RecipientWhitelistPoolToken.sol')
+  const Pod = artifacts.require('Pod.sol')
 
   this.init = async () => {
     registry = await setupERC1820({ web3, artifacts, account: owner })
@@ -61,6 +61,7 @@ module.exports = function PoolContext({ web3, artifacts, accounts }) {
     await token.mint(owner, web3.utils.toWei('100000', 'ether'))
     await token.mint(user1, web3.utils.toWei('100000', 'ether'))
     await token.mint(user2, web3.utils.toWei('100000', 'ether'))
+    await token.mint(user3, web3.utils.toWei('100000', 'ether'))
     return token
   }
 
@@ -95,6 +96,15 @@ module.exports = function PoolContext({ web3, artifacts, accounts }) {
     await pool.setPoolToken(poolToken.address)
 
     return poolToken
+  }
+
+  this.createPod = async () => {
+    pod = await Pod.new()
+    await pod.initialize(
+      pool.address
+    )
+
+    return pod
   }
 
   this.newPool = async () => {
@@ -157,14 +167,19 @@ module.exports = function PoolContext({ web3, artifacts, accounts }) {
   }
 
   this.nextDraw = async (options) => {
+    const { prize } = options || {}
     const currentDrawId = await pool.currentCommittedDrawId()
 
     if (currentDrawId.toString() === '0') {
       return await this.openNextDraw()
     } else {
       debug(`reward(${pool.address})`)
-      await moneyMarket.reward(pool.address)
-      return await this.rewardAndOpenNextDraw(options)
+      if (prize) {
+        await moneyMarket.rewardCustom(pool.address, prize)
+      } else {
+        await moneyMarket.reward(pool.address)
+      }
+      return await this.rewardAndOpenNextDraw()
     }
   }
 
