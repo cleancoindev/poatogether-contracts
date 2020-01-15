@@ -106,10 +106,6 @@ contract Pod is ERC777, FixedPoint, IERC777Recipient {
     revert("Pod/no-op");
   }
 
-  function _burnSupply(uint256) internal {
-    revert("Pod/no-op");
-  }
-
   /**
     */
   function operatorRedeem(address account, uint256 amount, bytes calldata data, bytes calldata operatorData) external {
