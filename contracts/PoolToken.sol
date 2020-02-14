@@ -358,7 +358,7 @@ contract PoolToken is Initializable, IERC20, IERC777 {
     *
     * Emits {Redeemed} and {Transfer} events.
     */
-  function operatorRedeem(address account, uint256 amount, bytes calldata data, bytes calldata operatorData) external {
+  function operatorRedeem(address payable account, uint256 amount, bytes calldata data, bytes calldata operatorData) external {
       require(isOperatorFor(msg.sender, account), "PoolToken/not-operator");
       _redeem(msg.sender, account, amount, data, operatorData);
   }
@@ -509,7 +509,7 @@ contract PoolToken is Initializable, IERC20, IERC777 {
     */
   function _redeem(
       address operator,
-      address from,
+      address payable from,
       uint256 amount,
       bytes memory data,
       bytes memory operatorData

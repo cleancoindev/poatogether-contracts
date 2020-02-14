@@ -18,11 +18,9 @@ along with PoolTogether.  If not, see <https://www.gnu.org/licenses/>.
 
 pragma solidity 0.5.12;
 
-import "@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts-ethereum-package/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts-ethereum-package/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts-ethereum-package/contracts/access/Roles.sol";
-import "./compound/ICErc20.sol";
 import "./DrawManager.sol";
 import "fixidity/contracts/FixidityLib.sol";
 import "@openzeppelin/upgrades/contracts/Initializable.sol";
@@ -32,8 +30,7 @@ import "./PoolToken.sol";
 /**
  * @title The Pool contract
  * @author Brendan Asselstine
- * @notice This contract allows users to pool deposits into Compound and win the accrued interest in periodic draws.
- * Funds are immediately deposited and withdrawn from the Compound cToken contract.
+ * @notice This contract allows users to pool deposits into Compound and win the accrued interest in periodic draws.s
  * Draws go through three stages: open, committed and rewarded in that order.
  * Only one draw is ever in the open stage.  Users deposits are always added to the open draw.  Funds in the open Draw are that user's open balance.
  * When a Draw is committed, the funds in it are moved to a user's committed total and the total committed balance of all users is updated.
@@ -204,11 +201,6 @@ contract BasePool is Initializable, ReentrancyGuard {
   }
 
   /**
-   * The Compound cToken that this Pool is bound to.
-   */
-  ICErc20 public cToken;
-
-  /**
    * The fee beneficiary to use for subsequent Draws.
    */
   address public nextFeeBeneficiary;
@@ -255,21 +247,17 @@ contract BasePool is Initializable, ReentrancyGuard {
   /**
    * @notice Initializes a new Pool contract.
    * @param _owner The owner of the Pool.  They are able to change settings and are set as the owner of new lotteries.
-   * @param _cToken The Compound Finance MoneyMarket contract to supply and withdraw tokens.
    * @param _feeFraction The fraction of the gross winnings that should be transferred to the owner as the fee.  Is a fixed point 18 number.
    * @param _feeBeneficiary The address that will receive the fee fraction
    */
   function init (
     address _owner,
-    address _cToken,
     uint256 _feeFraction,
     address _feeBeneficiary,
     uint256 _lockDuration,
     uint256 _cooldownDuration
   ) public initializer {
     require(_owner != address(0), "Pool/owner-zero");
-    require(_cToken != address(0), "Pool/ctoken-zero");
-    cToken = ICErc20(_cToken);
     _addAdmin(_owner);
     _setNextFeeFraction(_feeFraction);
     _setNextFeeBeneficiary(_feeBeneficiary);
@@ -364,7 +352,6 @@ contract BasePool is Initializable, ReentrancyGuard {
 
   /**
    * @notice Rewards the winner for the current committed Draw using the passed secret.
-   * The gross winnings are calculated by subtracting the accounted balance from the current underlying cToken balance.
    * A winner is calculated using the revealed secret.
    * If there is a winner (i.e. any eligible users) then winner's balance is updated with their net winnings.
    * The draw beneficiary's balance is updated with the fee.
@@ -390,15 +377,11 @@ contract BasePool is Initializable, ReentrancyGuard {
     address winningAddress = calculateWinner(entropy);
 
     // Calculate the gross winnings
-    uint256 underlyingBalance = balance();
+    uint256 contractBalance = address(this).balance;
 
     uint256 grossWinnings;
 
-    // It's possible when the APR is zero that the underlying balance will be slightly lower than the accountedBalance
-    // due to rounding errors in the Compound contract.
-    if (underlyingBalance > accountedBalance) {
-      grossWinnings = capWinnings(underlyingBalance.sub(accountedBalance));
-    }
+    grossWinnings = capWinnings(contractBalance.sub(accountedBalance));
 
     // Calculate the beneficiary fee
     uint256 fee = calculateFee(draw.feeFraction, grossWinnings);
@@ -417,7 +400,7 @@ contract BasePool is Initializable, ReentrancyGuard {
     // If there is a winner who is to receive non-zero winnings
     if (winningAddress != address(0) && netWinnings != 0) {
       // Updated the accounted total
-      accountedBalance = underlyingBalance;
+      accountedBalance = contractBalance;
 
       awardWinnings(winningAddress, netWinnings);
     } else {
@@ -491,40 +474,23 @@ contract BasePool is Initializable, ReentrancyGuard {
   }
 
   /**
-   * @notice Allows a user to deposit a sponsorship amount.  The deposit is transferred into the cToken.
+   * @notice Allows a user to deposit a sponsorship amount.
    * Sponsorships allow a user to contribute to the pool without becoming eligible to win.  They can withdraw their sponsorship at any time.
    * The deposit will immediately be added to Compound and the interest will contribute to the next draw.
-   * @param _amount The amount of the token underlying the cToken to deposit.
    */
-  function depositSponsorship(uint256 _amount) public unlessDepositsPaused nonReentrant {
-    // Transfer the tokens into this contract
-    require(token().transferFrom(msg.sender, address(this), _amount), "Pool/t-fail");
-
+  function depositSponsorship() public payable unlessDepositsPaused nonReentrant {
     // Deposit the sponsorship amount
-    _depositSponsorshipFrom(msg.sender, _amount);
+    _depositSponsorshipFrom(msg.sender, msg.value);
   }
 
   /**
-   * @notice Deposits the token balance for this contract as a sponsorship.
-   * If people erroneously transfer tokens to this contract, this function will allow us to recoup those tokens as sponsorship.
-   */
-  function transferBalanceToSponsorship() public unlessDepositsPaused {
-    // Deposit the sponsorship amount
-    _depositSponsorshipFrom(address(this), token().balanceOf(address(this)));
-  }
-
-  /**
-   * @notice Deposits into the pool under the current open Draw.  The deposit is transferred into the cToken.
+   * @notice Deposits into the pool under the current open Draw.
    * Once the open draw is committed, the deposit will be added to the user's total committed balance and increase their chances of winning
    * proportional to the total committed balance of all users.
-   * @param _amount The amount of the token underlying the cToken to deposit.
    */
-  function depositPool(uint256 _amount) public requireOpenDraw unlessDepositsPaused nonReentrant {
-    // Transfer the tokens into this contract
-    require(token().transferFrom(msg.sender, address(this), _amount), "Pool/t-fail");
-
+  function depositPool() public payable requireOpenDraw unlessDepositsPaused nonReentrant {
     // Deposit the funds
-    _depositPoolFrom(msg.sender, _amount);
+    _depositPoolFrom(msg.sender, msg.value);
   }
 
   /**
@@ -568,7 +534,7 @@ contract BasePool is Initializable, ReentrancyGuard {
   }
 
   /**
-   * @notice Deposits into the pool for a user.  Updates their balance and transfers their tokens into this contract.
+   * @notice Deposits into the pool for a user.  Updates their balance.
    * @param _spender The user who is depositing
    * @param _amount The amount they are depositing
    */
@@ -578,10 +544,6 @@ contract BasePool is Initializable, ReentrancyGuard {
 
     // Update the total of this contract
     accountedBalance = accountedBalance.add(_amount);
-
-    // Deposit into Compound
-    require(token().approve(address(cToken), _amount), "Pool/approve");
-    require(cToken.mint(_amount) == 0, "Pool/supply");
   }
 
   /**
@@ -651,7 +613,7 @@ contract BasePool is Initializable, ReentrancyGuard {
    * @param _amount The amount to withdraw
    */
   function withdrawCommittedDepositFrom(
-    address _from,
+    address payable _from,
     uint256 _amount
   ) external onlyToken notLocked returns (bool)  {
     return _withdrawCommittedDepositAndEmit(_from, _amount);
@@ -662,7 +624,7 @@ contract BasePool is Initializable, ReentrancyGuard {
    * @param _from User to withdraw for
    * @param _amount The amount to withdraw
    */
-  function _withdrawCommittedDepositAndEmit(address _from, uint256 _amount) internal returns (bool) {
+  function _withdrawCommittedDepositAndEmit(address payable _from, uint256 _amount) internal returns (bool) {
     drawState.withdrawCommitted(_from, _amount);
     _withdraw(_from, _amount);
 
@@ -691,9 +653,9 @@ contract BasePool is Initializable, ReentrancyGuard {
   }
 
   /**
-   * @notice Transfers tokens from the cToken contract to the sender.  Updates the accounted balance.
+   * @notice Transfers tokens to the sender.  Updates the accounted balance.
    */
-  function _withdraw(address _sender, uint256 _amount) internal {
+  function _withdraw(address payable _sender, uint256 _amount) internal {
     uint256 balance = balances[_sender];
 
     require(_amount <= balance, "Pool/no-funds");
@@ -704,9 +666,8 @@ contract BasePool is Initializable, ReentrancyGuard {
     // Update the total of this contract
     accountedBalance = accountedBalance.sub(_amount);
 
-    // Withdraw from Compound and transfer
-    require(cToken.redeemUnderlying(_amount) == 0, "Pool/redeem");
-    require(token().transfer(_sender, _amount), "Pool/transfer");
+    // Transfer
+    require(_sender.send(_amount), "Pool/transfer");
   }
 
   /**
@@ -834,23 +795,6 @@ contract BasePool is Initializable, ReentrancyGuard {
   }
 
   /**
-   * @notice Calculates the total estimated interest earned for the given number of blocks
-   * @param _blocks The number of block that interest accrued for
-   * @return The total estimated interest as a 18 point fixed decimal.
-   */
-  function estimatedInterestRate(uint256 _blocks) public view returns (uint256) {
-    return supplyRatePerBlock().mul(_blocks);
-  }
-
-  /**
-   * @notice Convenience function to return the supplyRatePerBlock value from the money market contract.
-   * @return The cToken supply rate per block
-   */
-  function supplyRatePerBlock() public view returns (uint256) {
-    return cToken.supplyRatePerBlock();
-  }
-
-  /**
    * @notice Sets the beneficiary fee fraction for subsequent Draws.
    * Fires the NextFeeFractionChanged event.
    * Can only be called by an admin.
@@ -939,22 +883,6 @@ contract BasePool is Initializable, ReentrancyGuard {
     require(currentCommittedDrawId() > 0, "Pool/committed");
     require(!currentCommittedDrawHasBeenRewarded(), "Pool/already");
     _;
-  }
-
-  /**
-   * @notice Returns the token underlying the cToken.
-   * @return An ERC20 token address
-   */
-  function token() public view returns (IERC20) {
-    return IERC20(cToken.underlying());
-  }
-
-  /**
-   * @notice Returns the underlying balance of this contract in the cToken.
-   * @return The cToken underlying balance for this contract.
-   */
-  function balance() public returns (uint256) {
-    return cToken.balanceOfUnderlying(address(this));
   }
 
   /**
