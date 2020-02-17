@@ -1,22 +1,14 @@
 const BN = require('bn.js')
-const {
-  SALT,
-  SECRET,
-  SECRET_HASH,
-  SUPPLY_RATE_PER_BLOCK,
-  MAX_NEW_FIXED
-} = require('./constants')
 const setupERC1820 = require('./setupERC1820')
 
 const debug = require('debug')('PoolContext.js')
 
 module.exports = function PoolContext({ web3, artifacts, accounts }) {
 
-  const [owner, admin, user1, user2, user3] = accounts
+  const [owner, admin, user1, user2, rewardAccount] = accounts
 
-  const Token = artifacts.require('Token.sol')
-  const MCDAwarePool = artifacts.require('MCDAwarePool.sol')
-  const CErc20Mock = artifacts.require('CErc20Mock.sol')
+  const BasePool = artifacts.require('BasePool.sol')
+  const MockPOSDAORandom = artifacts.require('MockPOSDAORandom.sol')
   const FixidityLib = artifacts.require('FixidityLib.sol')
   const SortitionSumTreeFactory = artifacts.require('SortitionSumTreeFactory.sol')
   const DrawManager = artifacts.require('DrawManager.sol')
@@ -28,38 +20,18 @@ module.exports = function PoolContext({ web3, artifacts, accounts }) {
     this.sumTree = await SortitionSumTreeFactory.new()
     await DrawManager.link("SortitionSumTreeFactory", this.sumTree.address)
     this.drawManager = await DrawManager.new()
-    await MCDAwarePool.link('DrawManager', this.drawManager.address)
+    await BasePool.link('DrawManager', this.drawManager.address)
     this.fixidity = await FixidityLib.new({ from: admin })
     this.blocklock = await Blocklock.new()
-    this.token = await this.newToken()
-    this.moneyMarket = await CErc20Mock.new({ from: admin })
-    await this.moneyMarket.initialize(this.token.address, new BN(SUPPLY_RATE_PER_BLOCK))
-    await this.token.mint(this.moneyMarket.address, new BN(MAX_NEW_FIXED).add(new BN(web3.utils.toWei('10000000', 'ether'))).toString())
-    await this.token.mint(admin, web3.utils.toWei('100000', 'ether'))
-  }
-
-  this.newToken = async (decimals = 18) => {
-    const token = await Token.new({ from: admin })
-    await token.initialize(owner, 'Token', 'TOK', decimals)
-    await token.mint(owner, web3.utils.toWei('100000', 'ether'))
-    await token.mint(user1, web3.utils.toWei('100000', 'ether'))
-    await token.mint(user2, web3.utils.toWei('100000', 'ether'))
-    await token.mint(user3, web3.utils.toWei('100000', 'ether'))
-    return token
+    this.random = await MockPOSDAORandom.new({ from: admin })
   }
 
   this.balance = async () => {
-    return (await this.pool.methods['balance()'].call()).toString()
+    return await web3.eth.getBalance(this.pool.address)
   }
 
-  this.depositPool = async (amount, options) => {
-    if (options) {
-      await this.token.approve(this.pool.address, amount, options)
-      await this.pool.depositPool(amount, options)  
-    } else {
-      await this.token.approve(this.pool.address, amount)
-      await this.pool.depositPool(amount)
-    }
+  this.depositPool = async (options) => {
+    await this.pool.depositPool(options) 
   }
 
   this.createPool = async (feeFraction = new BN('0'), cooldownDuration = 1) => {
@@ -82,22 +54,22 @@ module.exports = function PoolContext({ web3, artifacts, accounts }) {
   }
 
   this.newPool = async () => {
-    await MCDAwarePool.link("DrawManager", this.drawManager.address)
-    await MCDAwarePool.link("FixidityLib", this.fixidity.address)
-    await MCDAwarePool.link('Blocklock', this.blocklock.address)
+    await BasePool.link("DrawManager", this.drawManager.address)
+    await BasePool.link("FixidityLib", this.fixidity.address)
+    await BasePool.link('Blocklock', this.blocklock.address)
     
-    return await MCDAwarePool.new()
+    return await BasePool.new()
   }
 
   this.createPoolNoOpenDraw = async (feeFraction = new BN('0'), cooldownDuration = 1) => {
     this.pool = await this.newPool()
 
     // just long enough to lock then reward
-    const lockDuration = 2
+    const lockDuration = 3
     
     await this.pool.init(
       owner,
-      this.moneyMarket.address,
+      this.random.address,
       feeFraction,
       owner,
       lockDuration,
@@ -110,12 +82,12 @@ module.exports = function PoolContext({ web3, artifacts, accounts }) {
   this.rewardAndOpenNextDraw = async (options) => {
     let logs
 
-    debug(`rewardAndOpenNextDraw(${SECRET_HASH}, ${SECRET})`)
+    debug(`rewardAndOpenNextDraw()`)
     await this.pool.lockTokens()
     if (options) {
-      logs = (await this.pool.rewardAndOpenNextDraw(SECRET_HASH, SECRET, SALT, options)).logs;
+      logs = (await this.pool.rewardAndOpenNextDraw(options)).logs;
     } else {
-      logs = (await this.pool.rewardAndOpenNextDraw(SECRET_HASH, SECRET, SALT)).logs;
+      logs = (await this.pool.rewardAndOpenNextDraw()).logs;
     }
 
     // console.log(logs.map(log => log.event))
@@ -131,8 +103,8 @@ module.exports = function PoolContext({ web3, artifacts, accounts }) {
   }
 
   this.openNextDraw = async () => {
-    debug(`openNextDraw(${SECRET_HASH})`)
-    let logs = (await this.pool.openNextDraw(SECRET_HASH)).logs
+    debug(`openNextDraw()`)
+    let logs = (await this.pool.openNextDraw()).logs
 
     const Committed = logs.find(log => log.event === 'Committed')
     const Opened = logs.find(log => log.event === 'Opened')
@@ -147,7 +119,12 @@ module.exports = function PoolContext({ web3, artifacts, accounts }) {
       return await this.openNextDraw()
     } else {
       debug(`reward(${this.pool.address})`)
-      await this.moneyMarket.reward(this.pool.address)
+      const balance = await web3.eth.getBalance(this.pool.address)
+      await web3.eth.sendTransaction({
+        to: this.pool.address,
+        from: rewardAccount,
+        value: new BN(balance).mul(new BN(2)).div(new BN(10))
+      })
       return await this.rewardAndOpenNextDraw(options)
     }
   }

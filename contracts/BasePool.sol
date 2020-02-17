@@ -229,6 +229,11 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
   PoolToken public poolToken;
 
   /**
+   * @notice Accepts transfers of native tokens
+   */
+  function() external payable {}
+
+  /**
    * @notice Initializes a new Pool contract.
    * @param _owner The owner of the Pool.  They are able to change settings and are set as the owner of new lotteries.
    * @param _randomContract The address of RandomAuRa contract
