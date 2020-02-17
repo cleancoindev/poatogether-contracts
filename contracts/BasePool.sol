@@ -71,13 +71,6 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
   event DepositedAndCommitted(address indexed sender, uint256 amount);
 
   /**
-   * Emitted when Sponsors have deposited into the Pool
-   * @param sender The purchaser of the tickets
-   * @param amount The size of the deposit
-   */
-  event SponsorshipDeposited(address indexed sender, uint256 amount);
-
-  /**
    * Emitted when an admin has been added to the Pool.
    * @param admin The admin that was added
    */
@@ -95,13 +88,6 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
    * @param amount The amount that the user withdrew
    */
   event Withdrawn(address indexed sender, uint256 amount);
-
-  /**
-   * Emitted when a user withdraws their sponsorship and fees from the pool.
-   * @param sender The user that is withdrawing
-   * @param amount The amount they are withdrawing
-   */
-  event SponsorshipAndFeesWithdrawn(address indexed sender, uint256 amount);
 
   /**
    * Emitted when a user withdraws from their open deposit.
@@ -430,16 +416,6 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
   }
 
   /**
-   * @notice Allows a user to deposit a sponsorship amount.
-   * Sponsorships allow a user to contribute to the pool without becoming eligible to win.  They can withdraw their sponsorship at any time.
-   * The deposit will immediately be added to Compound and the interest will contribute to the next draw.
-   */
-  function depositSponsorship() public payable unlessDepositsPaused nonReentrant {
-    // Deposit the sponsorship amount
-    _depositSponsorshipFrom(msg.sender, msg.value);
-  }
-
-  /**
    * @notice Deposits into the pool under the current open Draw.
    * Once the open draw is committed, the deposit will be added to the user's total committed balance and increase their chances of winning
    * proportional to the total committed balance of all users.
@@ -447,18 +423,6 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
   function depositPool() public payable requireOpenDraw unlessDepositsPaused nonReentrant {
     // Deposit the funds
     _depositPoolFrom(msg.sender, msg.value);
-  }
-
-  /**
-   * @notice Deposits sponsorship for a user
-   * @param _spender The user who is sponsoring
-   * @param _amount The amount they are sponsoring
-   */
-  function _depositSponsorshipFrom(address _spender, uint256 _amount) internal {
-    // Deposit the funds
-    _depositFrom(_spender, _amount);
-
-    emit SponsorshipDeposited(_spender, _amount);
   }
 
   /**
@@ -518,26 +482,6 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
     }
 
     emit Withdrawn(msg.sender, balance);
-  }
-
-  /**
-   * Withdraws only from the sender's sponsorship and fee balances
-   * @param _amount The amount to withdraw
-   */
-  function withdrawSponsorshipAndFee(uint256 _amount) public {
-    uint256 sponsorshipAndFees = sponsorshipAndFeeBalanceOf(msg.sender);
-    require(_amount <= sponsorshipAndFees, "Pool/exceeds-sfee");
-    _withdraw(msg.sender, _amount);
-
-    emit SponsorshipAndFeesWithdrawn(msg.sender, _amount);
-  }
-
-  /**
-   * Returns the total balance of the user's sponsorship and fees
-   * @param _sender The user whose balance should be returned
-   */
-  function sponsorshipAndFeeBalanceOf(address _sender) public view returns (uint256) {
-    return balances[_sender].sub(drawState.balanceOf(_sender));
   }
 
   /**
@@ -706,7 +650,7 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
   }
 
   /**
-   * @notice Returns a user's total balance.  This includes their sponsorships, fees, open deposits, and committed deposits.
+   * @notice Returns a user's total balance.  This includes their open deposits and committed deposits.
    * @param _addr The address of the user to check.
    * @return The user's current balance.
    */
