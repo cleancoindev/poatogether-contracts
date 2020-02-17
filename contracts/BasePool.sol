@@ -26,6 +26,7 @@ import "fixidity/contracts/FixidityLib.sol";
 import "@openzeppelin/upgrades/contracts/Initializable.sol";
 import "./Blocklock.sol";
 import "./PoolToken.sol";
+import "./Random.sol";
 
 /**
  * @title The Pool contract
@@ -47,7 +48,7 @@ import "./PoolToken.sol";
  * Step 5: Draw 5 Open | Draw 4 Committed | Draw 3 Rewarded
  * Step X: ...
  */
-contract BasePool is Initializable, ReentrancyGuard {
+contract BasePool is Initializable, ReentrancyGuard, Random {
   using DrawManager for DrawManager.State;
   using SafeMath for uint256;
   using Roles for Roles.Role;
@@ -128,13 +129,11 @@ contract BasePool is Initializable, ReentrancyGuard {
    * Emitted when a new draw is opened for deposit.
    * @param drawId The draw id
    * @param feeBeneficiary The fee beneficiary for this draw
-   * @param secretHash The committed secret hash
    * @param feeFraction The fee fraction of the winnings to be given to the beneficiary
    */
   event Opened(
     uint256 indexed drawId,
     address indexed feeBeneficiary,
-    bytes32 secretHash,
     uint256 feeFraction
   );
 
@@ -193,7 +192,6 @@ contract BasePool is Initializable, ReentrancyGuard {
     uint256 feeFraction; //fixed point 18
     address feeBeneficiary;
     uint256 openedBlock;
-    bytes32 secretHash;
     bytes32 entropy;
     address winner;
     uint256 netWinnings;
@@ -247,11 +245,13 @@ contract BasePool is Initializable, ReentrancyGuard {
   /**
    * @notice Initializes a new Pool contract.
    * @param _owner The owner of the Pool.  They are able to change settings and are set as the owner of new lotteries.
+   * @param _randomContract The address of RandomAuRa contract
    * @param _feeFraction The fraction of the gross winnings that should be transferred to the owner as the fee.  Is a fixed point 18 number.
    * @param _feeBeneficiary The address that will receive the fee fraction
    */
   function init (
     address _owner,
+    address _randomContract,
     uint256 _feeFraction,
     address _feeBeneficiary,
     uint256 _lockDuration,
@@ -262,6 +262,7 @@ contract BasePool is Initializable, ReentrancyGuard {
     _setNextFeeFraction(_feeFraction);
     _setNextFeeBeneficiary(_feeBeneficiary);
     initBlocklock(_lockDuration, _cooldownDuration);
+    Random._init(_randomContract);
   }
 
   function setPoolToken(PoolToken _poolToken) external onlyAdmin {
@@ -277,15 +278,13 @@ contract BasePool is Initializable, ReentrancyGuard {
 
   /**
    * @notice Opens a new Draw.
-   * @param _secretHash The secret hash to commit to the Draw.
    */
-  function open(bytes32 _secretHash) internal {
+  function open() internal {
     drawState.openNextDraw();
     draws[drawState.openDrawIndex] = Draw(
       nextFeeFraction,
       nextFeeBeneficiary,
       block.number,
-      _secretHash,
       bytes32(0),
       address(0),
       uint256(0),
@@ -294,7 +293,6 @@ contract BasePool is Initializable, ReentrancyGuard {
     emit Opened(
       drawState.openDrawIndex,
       nextFeeBeneficiary,
-      _secretHash,
       nextFeeFraction
     );
   }
@@ -311,56 +309,38 @@ contract BasePool is Initializable, ReentrancyGuard {
   }
 
   /**
-   * @notice Commits the current open draw, if any, and opens the next draw using the passed hash.  Really this function is only called twice:
-   * the first after Pool contract creation and the second immediately after.
-   * Can only be called by an admin.
+   * @notice Commits the current open draw, if any, and opens the next draw.
    * May fire the Committed event, and always fires the Open event.
-   * @param nextSecretHash The secret hash to use to open a new Draw
    */
-  function openNextDraw(bytes32 nextSecretHash) public onlyAdmin {
+  function openNextDraw() public {
     if (currentCommittedDrawId() > 0) {
       require(currentCommittedDrawHasBeenRewarded(), "Pool/not-reward");
     }
     if (currentOpenDrawId() != 0) {
       emitCommitted();
     }
-    open(nextSecretHash);
+    open();
   }
 
   /**
-   * @notice Ignores the current draw, and opens the next draw.
-   * @dev This function will be removed once the winner selection has been decentralized.
-   * @param nextSecretHash The hash to commit for the next draw
-   */
-  function rolloverAndOpenNextDraw(bytes32 nextSecretHash) public onlyAdmin {
-    rollover();
-    openNextDraw(nextSecretHash);
-  }
-
-  /**
-   * @notice Rewards the current committed draw using the passed secret, commits the current open draw, and opens the next draw using the passed secret hash.
+   * @notice Rewards the current committed draw, commits the current open draw, and opens the next draw.
    * Can only be called by an admin.
    * Fires the Rewarded event, the Committed event, and the Open event.
-   * @param nextSecretHash The secret hash to use to open a new Draw
-   * @param lastSecret The secret to reveal to reward the current committed Draw.
-   * @param _salt The salt that was used to conceal the secret
    */
-  function rewardAndOpenNextDraw(bytes32 nextSecretHash, bytes32 lastSecret, bytes32 _salt) public onlyAdmin {
-    reward(lastSecret, _salt);
-    openNextDraw(nextSecretHash);
+  function rewardAndOpenNextDraw() public {
+    reward();
+    openNextDraw();
   }
 
   /**
    * @notice Rewards the winner for the current committed Draw using the passed secret.
-   * A winner is calculated using the revealed secret.
+   * A winner is calculated using the random seed.
    * If there is a winner (i.e. any eligible users) then winner's balance is updated with their net winnings.
    * The draw beneficiary's balance is updated with the fee.
    * The accounted balance is updated to include the fee and, if there was a winner, the net winnings.
    * Fires the Rewarded event.
-   * @param _secret The secret to reveal for the current committed Draw
-   * @param _salt The salt that was used to conceal the secret
    */
-  function reward(bytes32 _secret, bytes32 _salt) public onlyAdmin onlyLocked requireCommittedNoReward nonReentrant {
+  function reward() public onlyLocked requireCommittedNoReward nonReentrant {
     blocklock.unlock(block.number);
     // require that there is a committed draw
     // require that the committed draw has not been rewarded
@@ -368,10 +348,9 @@ contract BasePool is Initializable, ReentrancyGuard {
 
     Draw storage draw = draws[drawId];
 
-    require(draw.secretHash == keccak256(abi.encodePacked(_secret, _salt)), "Pool/bad-secret");
-
-    // derive entropy from the revealed secret
-    bytes32 entropy = keccak256(abi.encodePacked(_secret));
+    // derive entropy from the random seed
+    uint256 seed = _useSeed();
+    bytes32 entropy = keccak256(abi.encodePacked(seed));
 
     // Select the winner using the hash as entropy
     address winningAddress = calculateWinner(entropy);
@@ -424,29 +403,6 @@ contract BasePool is Initializable, ReentrancyGuard {
 
     // Enter their winnings into the open draw
     drawState.deposit(winner, amount);
-  }
-
-  /**
-   * @notice A function that skips the reward for the committed draw id.
-   * @dev This function will be removed once the entropy is decentralized.
-   */
-  function rollover() public onlyAdmin requireCommittedNoReward {
-    uint256 drawId = currentCommittedDrawId();
-
-    Draw storage draw = draws[drawId];
-    draw.entropy = ROLLED_OVER_ENTROPY_MAGIC_NUMBER;
-
-    emit RolledOver(
-      drawId
-    );
-
-    emit Rewarded(
-      drawId,
-      address(0),
-      ROLLED_OVER_ENTROPY_MAGIC_NUMBER,
-      0,
-      0
-    );
   }
 
   /**
@@ -716,7 +672,6 @@ contract BasePool is Initializable, ReentrancyGuard {
     uint256 feeFraction,
     address feeBeneficiary,
     uint256 openedBlock,
-    bytes32 secretHash,
     bytes32 entropy,
     address winner,
     uint256 netWinnings,
@@ -726,7 +681,6 @@ contract BasePool is Initializable, ReentrancyGuard {
     feeFraction = draw.feeFraction;
     feeBeneficiary = draw.feeBeneficiary;
     openedBlock = draw.openedBlock;
-    secretHash = draw.secretHash;
     entropy = draw.entropy;
     winner = draw.winner;
     netWinnings = draw.netWinnings;
