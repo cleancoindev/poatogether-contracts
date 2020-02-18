@@ -54,8 +54,6 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
   using Roles for Roles.Role;
   using Blocklock for Blocklock.State;
 
-  bytes32 internal constant ROLLED_OVER_ENTROPY_MAGIC_NUMBER = bytes32(uint256(1));
-
   /**
    * Emitted when a user deposits into the Pool.
    * @param sender The purchaser of the tickets
@@ -168,11 +166,6 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
    * Emitted when an admin unpauses the contract
    */
   event DepositsUnpaused(address indexed sender);
-
-  /**
-   * Emitted when the draw is rolled over in the event that the secret is forgotten.
-   */
-  event RolledOver(uint256 indexed drawId);
 
   struct Draw {
     uint256 feeFraction; //fixed point 18
@@ -442,20 +435,6 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
     _depositFrom(_spender, _amount);
 
     emit Deposited(_spender, _amount);
-  }
-
-  /**
-   * @notice Deposits into the pool for a user.  The deposit is made part of the currently committed draw
-   * @param _spender The user who is depositing
-   * @param _amount The amount to deposit
-   */
-  function _depositPoolFromCommitted(address _spender, uint256 _amount) internal notLocked {
-    // Update the user's eligibility
-    drawState.depositCommitted(_spender, _amount);
-
-    _depositFrom(_spender, _amount);
-
-    emit DepositedAndCommitted(_spender, _amount);
   }
 
   /**
