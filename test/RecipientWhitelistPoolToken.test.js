@@ -58,35 +58,35 @@ contract('RecipientWhitelistPoolToken', (accounts) => {
     describe('with whitelisting enabled', () => {
       beforeEach(async () => {
         await poolToken.setRecipientWhitelistEnabled(true)
-        await poolContext.depositPool(toWei('10'), { from: user1 })
+        await poolContext.depositPool({ from: user1, value: toWei('1') })
         await poolContext.nextDraw()
       })
 
       describe('transfer()', () => {
         it('should not be allowed', async () => {
-          await chai.assert.isRejected(poolToken.transfer(user2, toWei('10'), { from: user1 }), /Pool\/not-list/)
+          await chai.assert.isRejected(poolToken.transfer(user2, toWei('1'), { from: user1 }), /Pool\/not-list/)
         })
 
         it('should be allowed for whitelist', async () => {
           await poolToken.setRecipientWhitelisted(user2, true)
-          await poolToken.transfer(user2, toWei('10'), { from: user1 })
+          await poolToken.transfer(user2, toWei('1'), { from: user1 })
         })
       })
       
       describe('send()', () => {
         it('should not be allowed', async () => {
-          await chai.assert.isRejected(poolToken.send(user2, toWei('10'), [], { from: user1 }), /Pool\/not-list/)
+          await chai.assert.isRejected(poolToken.send(user2, toWei('1'), [], { from: user1 }), /Pool\/not-list/)
         })
 
         it('should be allowed for whitelist', async () => {
           await poolToken.setRecipientWhitelisted(user2, true)
-          await poolToken.send(user2, toWei('10'), [], { from: user1 })
+          await poolToken.send(user2, toWei('1'), [], { from: user1 })
         })
       })
 
       describe('redeem()', () => {
         it('should work', async () => {
-          await poolToken.redeem(toWei('10'), [], { from: user1 })
+          await poolToken.redeem(toWei('1'), [], { from: user1 })
         })
       })
     })

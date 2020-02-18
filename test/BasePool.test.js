@@ -12,7 +12,7 @@ const {
 
 const debug = require('debug')('Pool.test.js')
 
-contract.only('BasePool', (accounts) => {
+contract('BasePool', (accounts) => {
   let pool
   
   const [owner, admin, user1, user2, rewardAccount] = accounts
