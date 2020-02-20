@@ -34,8 +34,13 @@ module.exports = function PoolContext({ web3, artifacts, accounts }) {
     await this.pool.depositPool(options) 
   }
 
-  this.createPool = async (feeFraction = new BN('0'), cooldownDuration = 1) => {
-    this.pool = await this.createPoolNoOpenDraw(feeFraction, cooldownDuration)
+  this.createPool = async (
+    feeFraction = new BN('0'),
+    cooldownDuration = 1,
+    nextDrawShare = new BN('0'),
+    executorShare = new BN('0')
+  ) => {
+    this.pool = await this.createPoolNoOpenDraw(feeFraction, cooldownDuration, nextDrawShare, executorShare)
     await this.openNextDraw()
     return this.pool
   }
@@ -61,7 +66,12 @@ module.exports = function PoolContext({ web3, artifacts, accounts }) {
     return await BasePool.new()
   }
 
-  this.createPoolNoOpenDraw = async (feeFraction = new BN('0'), cooldownDuration = 1) => {
+  this.createPoolNoOpenDraw = async (
+    feeFraction = new BN('0'),
+    cooldownDuration = 1,
+    nextDrawShare = new BN('0'),
+    executorShare = new BN('0')
+  ) => {
     this.pool = await this.newPool()
 
     // just long enough to lock then reward
@@ -73,7 +83,9 @@ module.exports = function PoolContext({ web3, artifacts, accounts }) {
       feeFraction,
       owner,
       lockDuration,
-      cooldownDuration
+      cooldownDuration,
+      nextDrawShare,
+      executorShare
     )
 
     return this.pool

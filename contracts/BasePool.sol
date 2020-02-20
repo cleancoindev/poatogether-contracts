@@ -136,13 +136,17 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
    * @param entropy The entropy used to select the winner
    * @param winnings The net winnings given to the winner
    * @param fee The fee being given to the draw beneficiary
+   * @param nextDrawShare The amount of tokens being left for the next draw
+   * @param executorReward The reward being given to the executor
    */
   event Rewarded(
     uint256 indexed drawId,
     address indexed winner,
     bytes32 entropy,
     uint256 winnings,
-    uint256 fee
+    uint256 fee,
+    uint256 nextDrawShare,
+    uint256 executorReward
   );
 
   /**
@@ -156,6 +160,18 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
    * @param feeBeneficiary The next fee beneficiary
    */
   event NextFeeBeneficiaryChanged(address indexed feeBeneficiary);
+
+  /**
+   * Emitted when the share of the next draw is changed.
+   * @param share The share is encoded as a fixed point 18 decimal
+   */
+  event NextDrawShareChanged(uint256 share);
+
+  /**
+   * Emitted when the share of the executor is changed.
+   * @param share The share is encoded as a fixed point 18 decimal
+   */
+  event ExecutorShareChanged(uint256 share);
 
   /**
    * Emitted when an admin pauses the contract
@@ -186,6 +202,16 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
    * The fee fraction to use for subsequent Draws.
    */
   uint256 public nextFeeFraction;
+
+  /**
+   * The percentage of the prize that will go to the next draw.
+   */
+  uint256 public nextDrawShare;
+
+  /**
+   * The percentage of the prize that will go to the executor of the reward method.
+   */
+  uint256 public executorShare;
 
   /**
    * The total of all balances
@@ -233,18 +259,23 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
    * @param _feeFraction The fraction of the gross winnings that should be transferred to the owner as the fee.  Is a fixed point 18 number.
    * @param _feeBeneficiary The address that will receive the fee fraction
    */
-  function init (
+  function init(
     address _owner,
     address _randomContract,
     uint256 _feeFraction,
     address _feeBeneficiary,
     uint256 _lockDuration,
-    uint256 _cooldownDuration
+    uint256 _cooldownDuration,
+    uint256 _nextDrawShare,
+    uint256 _executorShare
   ) public initializer {
     require(_owner != address(0), "Pool/owner-zero");
     _addAdmin(_owner);
     _setNextFeeFraction(_feeFraction);
     _setNextFeeBeneficiary(_feeBeneficiary);
+    _setNextDrawShare(_nextDrawShare);
+    _setExecutorShare(_executorShare);
+    _validateSharesSum();
     initBlocklock(_lockDuration, _cooldownDuration);
     Random._init(_randomContract);
   }
@@ -342,18 +373,24 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
     // Calculate the gross winnings
     uint256 contractBalance = address(this).balance;
 
-    uint256 grossWinnings;
-
-    grossWinnings = capWinnings(contractBalance.sub(accountedBalance));
+    uint256 grossWinnings = capWinnings(contractBalance.sub(accountedBalance));
 
     // Calculate the beneficiary fee
-    uint256 fee = calculateFee(draw.feeFraction, grossWinnings);
+    uint256 fee = calculatePercentage(draw.feeFraction, grossWinnings);
+
+    // Calculate the amount of tokens that will go to the next draw
+    uint256 nextDrawShareInTokens = calculatePercentage(nextDrawShare, grossWinnings);
+
+    // Calculate the amount of tokens that will go to the executor of this method
+    uint256 executorReward = calculatePercentage(executorShare, grossWinnings);
 
     // Update balance of the beneficiary
     balances[draw.feeBeneficiary] = balances[draw.feeBeneficiary].add(fee);
+    // Update balance of the executor
+    balances[msg.sender] = balances[msg.sender].add(executorReward);
 
     // Calculate the net winnings
-    uint256 netWinnings = grossWinnings.sub(fee);
+    uint256 netWinnings = grossWinnings.sub(fee).sub(executorReward).sub(nextDrawShareInTokens);
 
     draw.winner = winningAddress;
     draw.netWinnings = netWinnings;
@@ -363,12 +400,12 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
     // If there is a winner who is to receive non-zero winnings
     if (winningAddress != address(0) && netWinnings != 0) {
       // Updated the accounted total
-      accountedBalance = contractBalance;
+      accountedBalance = contractBalance.sub(nextDrawShareInTokens);
 
       awardWinnings(winningAddress, netWinnings);
     } else {
       // Only account for the fee
-      accountedBalance = accountedBalance.add(fee);
+      accountedBalance = accountedBalance.add(fee).add(executorReward);
     }
 
     emit Rewarded(
@@ -376,7 +413,9 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
       winningAddress,
       entropy,
       netWinnings,
-      fee
+      fee,
+      nextDrawShareInTokens,
+      executorReward
     );
     emit FeeCollected(draw.feeBeneficiary, fee, drawId);
   }
@@ -402,15 +441,15 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
   }
 
   /**
-   * @notice Calculate the beneficiary fee using the passed fee fraction and gross winnings.
-   * @param _feeFraction The fee fraction, between 0 and 1, represented as a 18 point fixed number.
-   * @param _grossWinnings The gross winnings to take a fraction of.
+   * @notice Calculates the percentage of the number.
+   * @param _percentage The percentage, between 0 and 1, represented as a 18 point fixed number.
+   * @param _number The number to calculate percentage of.
    */
-  function calculateFee(uint256 _feeFraction, uint256 _grossWinnings) internal pure returns (uint256) {
-    int256 grossWinningsFixed = FixidityLib.newFixed(int256(_grossWinnings));
-    // _feeFraction *must* be less than 1 ether, so it will never overflow
-    int256 feeFixed = FixidityLib.multiply(grossWinningsFixed, FixidityLib.newFixed(int256(_feeFraction), uint8(18)));
-    return uint256(FixidityLib.fromFixed(feeFixed));
+  function calculatePercentage(uint256 _percentage, uint256 _number) internal pure returns (uint256) {
+    int256 numberFixed = FixidityLib.newFixed(int256(_number));
+    // _percentage *must* be less than 1 ether, so it will never overflow
+    int256 valueFixed = FixidityLib.multiply(numberFixed, FixidityLib.newFixed(int256(_percentage), uint8(18)));
+    return uint256(FixidityLib.fromFixed(valueFixed));
   }
 
   /**
@@ -685,12 +724,11 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
    */
   function setNextFeeFraction(uint256 _feeFraction) public onlyAdmin {
     _setNextFeeFraction(_feeFraction);
+    _validateSharesSum();
   }
 
   function _setNextFeeFraction(uint256 _feeFraction) internal {
-    require(_feeFraction <= 1 ether, "Pool/less-1");
     nextFeeFraction = _feeFraction;
-
     emit NextFeeFractionChanged(_feeFraction);
   }
 
@@ -710,8 +748,49 @@ contract BasePool is Initializable, ReentrancyGuard, Random {
   function _setNextFeeBeneficiary(address _feeBeneficiary) internal {
     require(_feeBeneficiary != address(0), "Pool/not-zero");
     nextFeeBeneficiary = _feeBeneficiary;
-
     emit NextFeeBeneficiaryChanged(_feeBeneficiary);
+  }
+
+  /**
+   * @notice Sets the percentage of the prize that will go to the next draw.
+   * Fires the NextDrawShareChanged event.
+   * Can only be called by an admin.
+   * @param _share The share to use.
+   * Must be between 0 and 1 and formatted as a fixed point number with 18 decimals (as in Ether).
+   */
+  function setNextDrawShare(uint256 _share) public onlyAdmin {
+    _setNextDrawShare(_share);
+    _validateSharesSum();
+  }
+
+  function _setNextDrawShare(uint256 _share) internal {
+    nextDrawShare = _share;
+    emit NextDrawShareChanged(_share);
+  }
+
+  /**
+   * @notice Sets the percentage of the prize that will go to the executor of the reward method.
+   * Fires the ExecutorShareChanged event.
+   * Can only be called by an admin.
+   * @param _share The share to use.
+   * Must be between 0 and 1 and formatted as a fixed point number with 18 decimals (as in Ether).
+   */
+  function setExecutorShare(uint256 _share) public onlyAdmin {
+    _setExecutorShare(_share);
+    _validateSharesSum();
+  }
+
+  function _setExecutorShare(uint256 _share) internal {
+    executorShare = _share;
+    emit ExecutorShareChanged(_share);
+  }
+
+  /**
+   * @notice Validates the sum of set shares. It must be less than or equal to 1
+   */
+  function _validateSharesSum() internal view {
+    uint256 sum = nextFeeFraction.add(nextDrawShare).add(executorShare);
+    require(sum <= 1 ether, "Pool/less-1");
   }
 
   /**

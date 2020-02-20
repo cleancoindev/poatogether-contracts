@@ -43,7 +43,9 @@ contract('BasePool', (accounts) => {
         new BN('0'),
         owner,
         10,
-        10
+        10,
+        new BN('0'),
+        new BN('0')
       ), /Pool\/owner-zero/)
     })
 
@@ -55,8 +57,35 @@ contract('BasePool', (accounts) => {
         new BN('0'),
         owner,
         10,
-        10
+        10,
+        new BN('0'),
+        new BN('0')
       ), /Random\/contract-zero/)
+    })
+
+    it('should fail if the sum of shares is bigger than 1', async () => {
+      pool = await Pool.new()
+      await chai.assert.isRejected(pool.init(
+        owner,
+        random.address,
+        toWei('0.76'),
+        owner,
+        10,
+        10,
+        toWei('0.15'),
+        toWei('0.1')
+      ), /Pool\/less-1/)
+
+      await pool.init( // ok
+        owner,
+        random.address,
+        toWei('0.75'),
+        owner,
+        10,
+        10,
+        toWei('0.15'),
+        toWei('0.1')
+      )
     })
   })
 
@@ -529,32 +558,39 @@ contract('BasePool', (accounts) => {
     })
   })
 
-  describe('when fee fraction is greater than zero', () => {
-    beforeEach(() => {
-      /// Fee fraction is 10%
-      feeFraction = web3.utils.toWei('0.1', 'ether')
-    })
-
-    it('should reward the owner the fee', async () => {
-
-      pool = await poolContext.createPool(feeFraction)
+  describe('when shares are greater than zero', () => {
+    it('should reward the owner the fee, move a part of the prize to next draw and reward executor', async () => {
+      const feeFraction = toWei('0.1') // 10%
+      const nextDrawShare = toWei('0.15') // 15%
+      const executorShare = toWei('0.01') // 1%
+      pool = await poolContext.createPool(feeFraction, 1, nextDrawShare, executorShare)
 
       const user1Tickets = TICKET_PRICE.mul(new BN(10))
       await pool.depositPool({ from: user1, value: user1Tickets })
 
       await poolContext.nextDraw()
 
-      /// CErc20Mock awards 20% regardless of duration.
       const totalDeposit = user1Tickets
       const interestEarned = totalDeposit.mul(new BN(20)).div(new BN(100))
-      const fee = interestEarned.mul(new BN(10)).div(new BN(100))
+      const fee = interestEarned.mul(new BN(10)).div(new BN(100)) // 10%
+      const nextDrawShareInTokens = interestEarned.mul(new BN(15)).div(new BN(100)) // 15%
+      const executorReward = interestEarned.div(new BN(100)) // 1%
+      const winnerReward = interestEarned.sub(fee).sub(executorReward).sub(nextDrawShareInTokens)
 
       // we expect unlocking to transfer the fee to the owner
-      const { Rewarded } = await poolContext.nextDraw()
+      const { Rewarded } = await poolContext.nextDraw({ from: user2 })
 
+      assert.equal(Rewarded.args.winnings.toString(), winnerReward.toString())
       assert.equal(Rewarded.args.fee.toString(), fee.toString())
+      assert.equal(Rewarded.args.nextDrawShare.toString(), nextDrawShareInTokens.toString())
+      assert.equal(Rewarded.args.executorReward.toString(), executorReward.toString())
 
       assert.equal((await pool.totalBalanceOf(owner)).toString(), fee.toString())
+      assert.equal((await pool.totalBalanceOf(user2)).toString(), executorReward.toString())
+
+      const contractBalance = new BN(await web3.eth.getBalance(pool.address))
+      const accountedBalance = await pool.accountedBalance()
+      assert.equal(contractBalance.sub(accountedBalance).toString(), nextDrawShareInTokens.toString())
 
       // we expect the pool winner to receive the interest less the fee
       const user1Balance = new BN(await web3.eth.getBalance(user1))
@@ -562,7 +598,7 @@ contract('BasePool', (accounts) => {
       const newUser1Balance = new BN(await web3.eth.getBalance(user1))
       assert.equal(
         newUser1Balance.add(new BN(receipt.gasUsed)).toString(),
-        user1Balance.add(user1Tickets).add(interestEarned).sub(fee).toString()
+        user1Balance.add(user1Tickets).add(winnerReward).toString()
       )
     })
   })
@@ -626,6 +662,13 @@ contract('BasePool', (accounts) => {
       await pool.setNextFeeFraction(toWei('1'))
       await chai.assert.isRejected(pool.setNextFeeFraction(toWei('1.1')), /Pool\/less-1/)
     })
+
+    it('should require the sum of shares to be less than or equal to 1', async () => {
+      await pool.setNextDrawShare(toWei('0.15'))
+      await pool.setExecutorShare(toWei('0.1'))
+      await pool.setNextFeeFraction(toWei('0.75'))
+      await chai.assert.isRejected(pool.setNextFeeFraction(toWei('0.76')), /Pool\/less-1/)
+    })
   })
 
   describe('setNextFeeBeneficiary()', () => {
@@ -644,6 +687,62 @@ contract('BasePool', (accounts) => {
 
     it('should not allow the beneficiary to be zero', async () => {
       await chai.assert.isRejected(pool.setNextFeeBeneficiary(ZERO_ADDRESS), /Pool\/not-zero/)
+    })
+  })
+
+  describe('setNextDrawShare()', () => {
+    beforeEach(async () => {
+      pool = await poolContext.createPool()
+    })
+
+    it('should allow the owner to set the next draw share', async () => {
+      await pool.setNextDrawShare(toWei('0.15'))
+      assert.equal((await pool.nextDrawShare()).toString(), toWei('0.15'))
+    })
+
+    it('should not allow anyone else to set the next draw share', async () => {
+      await chai.assert.isRejected(pool.setNextDrawShare(toWei('0.15'), { from: user1 }), /Pool\/admin/)
+    })
+
+    it('should require the next draw share to be less than or equal to 1', async () => {
+      // 1 is okay
+      await pool.setNextDrawShare(toWei('1'))
+      await chai.assert.isRejected(pool.setNextDrawShare(toWei('1.1')), /Pool\/less-1/)
+    })
+
+    it('should require the sum of shares to be less than or equal to 1', async () => {
+      await pool.setExecutorShare(toWei('0.1'))
+      await pool.setNextFeeFraction(toWei('0.75'))
+      await pool.setNextDrawShare(toWei('0.15'))
+      await chai.assert.isRejected(pool.setNextDrawShare(toWei('0.16')), /Pool\/less-1/)
+    })
+  })
+
+  describe('setExecutorShare()', () => {
+    beforeEach(async () => {
+      pool = await poolContext.createPool()
+    })
+
+    it('should allow the owner to set the executor share', async () => {
+      await pool.setExecutorShare(toWei('0.01'))
+      assert.equal((await pool.executorShare()).toString(), toWei('0.01'))
+    })
+
+    it('should not allow anyone else to set the executor share', async () => {
+      await chai.assert.isRejected(pool.setExecutorShare(toWei('0.01'), { from: user1 }), /Pool\/admin/)
+    })
+
+    it('should require the executor share to be less than or equal to 1', async () => {
+      // 1 is okay
+      await pool.setExecutorShare(toWei('1'))
+      await chai.assert.isRejected(pool.setExecutorShare(toWei('1.1')), /Pool\/less-1/)
+    })
+
+    it('should require the sum of shares to be less than or equal to 1', async () => {
+      await pool.setNextFeeFraction(toWei('0.75'))
+      await pool.setNextDrawShare(toWei('0.15'))
+      await pool.setExecutorShare(toWei('0.1'))
+      await chai.assert.isRejected(pool.setExecutorShare(toWei('0.11')), /Pool\/less-1/)
     })
   })
 
