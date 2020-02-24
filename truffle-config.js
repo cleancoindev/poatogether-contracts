@@ -59,6 +59,17 @@ module.exports = {
       network_id: 42
     },
 
+    sokol: {
+      provider: () => new HDWalletProvider(
+        process.env.HDWALLET_MNEMONIC,
+        'https://sokol.poa.network',
+        0,
+        3
+      ),
+      skipDryRun: true,
+      network_id: 77
+    },
+
     mainnet_fork: {
       provider: () => new HDWalletProvider(
         process.env.HDWALLET_MNEMONIC,

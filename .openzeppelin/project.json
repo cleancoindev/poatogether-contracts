@@ -1,12 +1,8 @@
 {
   "manifestVersion": "2.2",
   "contracts": {
-    "PoolSaiToken": "RecipientWhitelistPoolToken",
-    "PoolDaiToken": "RecipientWhitelistPoolToken",
-    "PoolUsdcToken": "RecipientWhitelistPoolToken",
-    "PoolSai": "MCDAwarePool",
-    "PoolDai": "MCDAwarePool",
-    "PoolUsdc": "MCDAwarePool"
+    "PoolToken": "RecipientWhitelistPoolToken",
+    "Pool": "BasePool"
   },
   "dependencies": {},
   "name": "pooltogether",

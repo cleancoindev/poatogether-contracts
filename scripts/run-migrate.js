@@ -33,6 +33,14 @@ switch (program.network) {
     // The OpenZeppelin SDK network config that oz-console should use as reference
     networkConfig = '.openzeppelin/kovan.json'
     break
+  case 'sokol':
+    // The network that the oz-console app should talk to.  (should really just use the ozNetworkName)
+    consoleNetwork = 'https://sokol.poa.network'
+    // The OpenZeppelin SDK network name
+    ozNetworkName = 'sokol'
+    // The OpenZeppelin SDK network config that oz-console should use as reference
+    networkConfig = '.openzeppelin/dev-77.json'
+    break
   default: //rinkeby
     // The network that the oz-console app should talk to.  (should really just use the ozNetworkName)
     consoleNetwork = 'rinkeby'
