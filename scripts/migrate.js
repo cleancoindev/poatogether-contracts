@@ -30,9 +30,10 @@ async function migrate(context, ozNetworkName, ozOptions = '') {
   runShell(`oz create PoolToken ${ozOptions} --network ${ozNetworkName} --init init --args '"Pool POA","poolPOA",[],${context.contracts.Pool.address}'`)
   context.reload()
 
+  const tx = await context.contracts.Pool.setPoolToken(context.contracts.PoolToken.address, { gasPrice: 1000000000 })
+  await tx.wait()
   chai.expect(await context.contracts.Pool.isAdmin(ownerWallet.address)).to.be.true
-  await context.contracts.Pool.setPoolToken(context.contracts.PoolToken.address)
-  await context.contracts.Pool.addAdmin('0x79DF43B54c31c72a3d93465bdf72317C751822B3')
+  chai.expect(await context.contracts.Pool.poolToken()).to.be.eq(context.contracts.PoolToken.address)
 
   console.log(chalk.green('Done!'))
 }
